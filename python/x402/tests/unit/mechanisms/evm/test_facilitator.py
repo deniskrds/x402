@@ -118,21 +118,31 @@ _MISSING = object()
 MALFORMED_EIP3009_PAYLOADS = [
     pytest.param(None, "authorization", _MISSING, id="authorization_missing"),
     pytest.param(None, "authorization", "oops", id="authorization_not_object"),
-    pytest.param(None, "authorization", {}, id="authorization_empty"),
     pytest.param(None, "signature", 123, id="signature_not_string"),
+    pytest.param("authorization", "from", _MISSING, id="from_missing"),
     pytest.param("authorization", "value", _MISSING, id="value_missing"),
     pytest.param("authorization", "value", "abc", id="value_not_numeric"),
     pytest.param("authorization", "value", None, id="value_null"),
+    pytest.param("authorization", "value", 100000, id="value_json_number"),
     pytest.param("authorization", "value", "-1", id="value_negative"),
+    pytest.param("authorization", "value", "1" * 5000, id="value_over_int_digit_limit"),
+    pytest.param("authorization", "value", str(2**256), id="value_above_uint256"),
     pytest.param("authorization", "validBefore", _MISSING, id="valid_before_missing"),
+    pytest.param("authorization", "validBefore", "9" * 79, id="valid_before_too_long"),
     pytest.param("authorization", "validAfter", [], id="valid_after_not_string"),
     pytest.param("authorization", "to", 123, id="to_not_string"),
     pytest.param("authorization", "nonce", 123, id="nonce_not_string"),
+    pytest.param("authorization", "nonce", "zz", id="nonce_not_hex"),
+    pytest.param("authorization", "nonce", "0x0001", id="nonce_not_32_bytes"),
 ]
 
 
-def make_malformed_payload(parent: str | None, key: str, value) -> PaymentPayload:
-    payload = make_payment_payload()
+def malformed_field(parent: str | None, key: str) -> str:
+    return key if parent is None else f"{parent}.{key}"
+
+
+def make_malformed_payload(parent: str | None, key: str, value, make=None):
+    payload = (make or make_payment_payload)()
     target = payload.payload if parent is None else payload.payload[parent]
     if value is _MISSING:
         del target[key]
@@ -756,7 +766,17 @@ class TestVerify:
 
         assert result.is_valid is False
         assert result.invalid_reason == ERR_INVALID_PAYLOAD
-        assert key in result.invalid_message
+        assert result.invalid_message.startswith(f"{malformed_field(parent, key)} must be ")
+
+    def test_malformed_payload_reports_payer(self):
+        facilitator = ExactEvmFacilitatorScheme(MockFacilitatorSigner())
+
+        result = facilitator.verify(
+            make_malformed_payload("authorization", "value", "abc"), make_requirements()
+        )
+
+        assert result.invalid_reason == ERR_INVALID_PAYLOAD
+        assert result.payer == PAYER
 
 
 class TestSettle:
@@ -843,9 +863,19 @@ class TestSettle:
 
         assert result.success is False
         assert result.error_reason == ERR_INVALID_PAYLOAD
-        assert key in result.error_message
+        assert result.error_message.startswith(f"{malformed_field(parent, key)} must be ")
         assert result.network == NETWORK
         assert signer.write_calls == 0
+
+    def test_malformed_payload_reports_payer(self):
+        facilitator = ExactEvmFacilitatorScheme(MockFacilitatorSigner())
+
+        result = facilitator.settle(
+            make_malformed_payload("authorization", "value", "abc"), make_requirements()
+        )
+
+        assert result.error_reason == ERR_INVALID_PAYLOAD
+        assert result.payer == PAYER
 
 
 class TestEip3009PendingSettlementStore:
@@ -1154,6 +1184,30 @@ class TestVerifyV1:
 
         assert result.is_valid is False
         assert result.invalid_reason == ERR_AUTHORIZATION_VALUE_MISMATCH
+
+    @pytest.mark.parametrize(("parent", "key", "value"), MALFORMED_EIP3009_PAYLOADS)
+    def test_verify_rejects_malformed_payload(self, parent, key, value):
+        facilitator = ExactEvmSchemeV1(MockFacilitatorSigner())
+        payload = make_malformed_payload(parent, key, value, make=make_payment_payload_v1)
+
+        result = facilitator.verify(payload, make_requirements_v1())
+
+        assert result.is_valid is False
+        assert result.invalid_reason == ERR_INVALID_PAYLOAD
+        assert result.invalid_message.startswith(f"{malformed_field(parent, key)} must be ")
+
+    @pytest.mark.parametrize(("parent", "key", "value"), MALFORMED_EIP3009_PAYLOADS)
+    def test_settle_rejects_malformed_payload(self, parent, key, value):
+        signer = MockFacilitatorSigner()
+        facilitator = ExactEvmSchemeV1(signer)
+        payload = make_malformed_payload(parent, key, value, make=make_payment_payload_v1)
+
+        result = facilitator.settle(payload, make_requirements_v1())
+
+        assert result.success is False
+        assert result.error_reason == ERR_INVALID_PAYLOAD
+        assert result.error_message.startswith(f"{malformed_field(parent, key)} must be ")
+        assert signer.write_calls == 0
 
 
 class TestFacilitatorSchemeAttributes:

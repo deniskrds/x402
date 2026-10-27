@@ -57,6 +57,7 @@ from ..types import (
     ERC6492SignatureData,
     ExactEIP3009Payload,
     TransactionReceipt,
+    get_payload_payer,
     is_permit2_payload,
     validate_exact_evm_payload,
 )
@@ -155,7 +156,10 @@ class ExactEvmScheme:
         payload_error = validate_exact_evm_payload(payload.payload)
         if payload_error:
             return VerifyResponse(
-                is_valid=False, invalid_reason=ERR_INVALID_PAYLOAD, invalid_message=payload_error
+                is_valid=False,
+                invalid_reason=ERR_INVALID_PAYLOAD,
+                invalid_message=payload_error,
+                payer=get_payload_payer(payload.payload),
             )
         if is_permit2_payload(payload.payload):
             return verify_permit2(self._signer, payload, requirements, context)
@@ -447,6 +451,7 @@ class ExactEvmScheme:
                 error_reason=ERR_INVALID_PAYLOAD,
                 error_message=payload_error,
                 network=network,
+                payer=get_payload_payer(payload.payload),
                 transaction="",
             )
 

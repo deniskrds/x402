@@ -142,8 +142,11 @@ MALFORMED_PERMIT2_PAYLOADS = [
     pytest.param(("permit2Authorization", "permitted", "token"), None, id="token_not_string"),
     pytest.param(("permit2Authorization", "witness", "to"), 123, id="witness_to_not_string"),
     pytest.param(("permit2Authorization", "nonce"), "abc", id="nonce_not_numeric"),
+    pytest.param(("permit2Authorization", "nonce"), str(2**256), id="nonce_above_uint256"),
     pytest.param(("permit2Authorization", "deadline"), _MISSING, id="deadline_missing"),
+    pytest.param(("permit2Authorization", "deadline"), "1" * 5000, id="deadline_over_digit_limit"),
     pytest.param(("permit2Authorization", "permitted", "amount"), "-1", id="amount_negative"),
+    pytest.param(("permit2Authorization", "permitted", "amount"), 1000, id="amount_json_number"),
     pytest.param(("permit2Authorization", "witness", "validAfter"), [], id="valid_after_list"),
     pytest.param(("signature",), 123, id="signature_not_string"),
 ]
@@ -476,7 +479,16 @@ class TestVerifyPermit2:
 
         assert result.is_valid is False
         assert result.invalid_reason == ERR_INVALID_PAYLOAD
-        assert path[-1] in result.invalid_message
+        assert result.invalid_message.startswith(f"{'.'.join(path)} must be ")
+
+    def test_verify_malformed_payload_reports_payer(self):
+        facilitator = self._make_facilitator()
+        payload = make_malformed_payload(("permit2Authorization", "deadline"), "abc")
+
+        result = facilitator.verify(payload, make_requirements())
+
+        assert result.invalid_reason == ERR_INVALID_PAYLOAD
+        assert result.payer == PAYER
 
 
 # ============================================================================
@@ -805,7 +817,7 @@ class TestSettlePermit2:
 
         assert result.success is False
         assert result.error_reason == ERR_INVALID_PAYLOAD
-        assert path[-1] in result.error_message
+        assert result.error_message.startswith(f"{'.'.join(path)} must be ")
         assert result.network == NETWORK
         assert signer.write_calls == []
 
