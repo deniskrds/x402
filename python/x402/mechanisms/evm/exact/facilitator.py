@@ -19,6 +19,7 @@ from ..constants import (
     ERR_FACTORY_NOT_ALLOWED,
     ERR_FAILED_TO_GET_NETWORK_CONFIG,
     ERR_FAILED_TO_VERIFY_SIGNATURE,
+    ERR_INVALID_PAYLOAD,
     ERR_INVALID_SIGNATURE,
     ERR_INVALID_SIGNATURE_S,
     ERR_MISSING_EIP712_DOMAIN,
@@ -57,6 +58,7 @@ from ..types import (
     ExactEIP3009Payload,
     TransactionReceipt,
     is_permit2_payload,
+    validate_eip3009_payload,
 )
 from ..utils import (
     bytes_to_hex,
@@ -152,6 +154,11 @@ class ExactEvmScheme:
     ) -> VerifyResponse:
         if is_permit2_payload(payload.payload):
             return verify_permit2(self._signer, payload, requirements, context)
+        payload_error = validate_eip3009_payload(payload.payload)
+        if payload_error:
+            return VerifyResponse(
+                is_valid=False, invalid_reason=ERR_INVALID_PAYLOAD, invalid_message=payload_error
+            )
         verify_result, _ = self._verify(payload, requirements, simulate=True)
         return verify_result
 
@@ -437,6 +444,16 @@ class ExactEvmScheme:
             )
 
         network = str(requirements.network)
+
+        payload_error = validate_eip3009_payload(payload.payload)
+        if payload_error:
+            return SettleResponse(
+                success=False,
+                error_reason=ERR_INVALID_PAYLOAD,
+                error_message=payload_error,
+                network=network,
+                transaction="",
+            )
 
         # Fast path: a prior settle attempt for this exact payload already broadcast a
         # transaction whose receipt wait failed (settlement_pending). The resource server's

@@ -21,6 +21,7 @@ from x402.mechanisms.evm.constants import (
     ERR_AUTHORIZATION_VALUE_MISMATCH,
     ERR_FACTORY_NOT_ALLOWED,
     ERR_INSUFFICIENT_BALANCE,
+    ERR_INVALID_PAYLOAD,
     ERR_INVALID_SIGNATURE,
     ERR_NONCE_ALREADY_USED,
     ERR_SETTLEMENT_PENDING,
@@ -108,6 +109,36 @@ def make_requirements(
         max_timeout_seconds=3600,
         extra=extra if extra is not None else {"name": "USD Coin", "version": "2"},
     )
+
+
+_MISSING = object()
+
+# (parent, key, value): set payload[parent][key] (or payload[key] when parent is None);
+# _MISSING deletes the key.
+MALFORMED_EIP3009_PAYLOADS = [
+    pytest.param(None, "authorization", _MISSING, id="authorization_missing"),
+    pytest.param(None, "authorization", "oops", id="authorization_not_object"),
+    pytest.param(None, "authorization", {}, id="authorization_empty"),
+    pytest.param(None, "signature", 123, id="signature_not_string"),
+    pytest.param("authorization", "value", _MISSING, id="value_missing"),
+    pytest.param("authorization", "value", "abc", id="value_not_numeric"),
+    pytest.param("authorization", "value", None, id="value_null"),
+    pytest.param("authorization", "value", "-1", id="value_negative"),
+    pytest.param("authorization", "validBefore", _MISSING, id="valid_before_missing"),
+    pytest.param("authorization", "validAfter", [], id="valid_after_not_string"),
+    pytest.param("authorization", "to", 123, id="to_not_string"),
+    pytest.param("authorization", "nonce", 123, id="nonce_not_string"),
+]
+
+
+def make_malformed_payload(parent: str | None, key: str, value) -> PaymentPayload:
+    payload = make_payment_payload()
+    target = payload.payload if parent is None else payload.payload[parent]
+    if value is _MISSING:
+        del target[key]
+    else:
+        target[key] = value
+    return payload
 
 
 def make_payment_payload_v1(
@@ -717,6 +748,16 @@ class TestVerify:
             "expected the asset to be re-checked on a different network"
         )
 
+    @pytest.mark.parametrize(("parent", "key", "value"), MALFORMED_EIP3009_PAYLOADS)
+    def test_rejects_malformed_eip3009_payload(self, parent, key, value):
+        facilitator = ExactEvmFacilitatorScheme(MockFacilitatorSigner())
+
+        result = facilitator.verify(make_malformed_payload(parent, key, value), make_requirements())
+
+        assert result.is_valid is False
+        assert result.invalid_reason == ERR_INVALID_PAYLOAD
+        assert key in result.invalid_message
+
 
 class TestSettle:
     def test_fails_settlement_if_verification_fails(self):
@@ -792,6 +833,19 @@ class TestSettle:
         assert result.success is False
         assert result.error_reason == ERR_SETTLEMENT_PENDING
         assert result.transaction == "0x" + "34" * 32
+
+    @pytest.mark.parametrize(("parent", "key", "value"), MALFORMED_EIP3009_PAYLOADS)
+    def test_rejects_malformed_eip3009_payload(self, parent, key, value):
+        signer = MockFacilitatorSigner()
+        facilitator = ExactEvmFacilitatorScheme(signer)
+
+        result = facilitator.settle(make_malformed_payload(parent, key, value), make_requirements())
+
+        assert result.success is False
+        assert result.error_reason == ERR_INVALID_PAYLOAD
+        assert key in result.error_message
+        assert result.network == NETWORK
+        assert signer.write_calls == 0
 
 
 class TestEip3009PendingSettlementStore:

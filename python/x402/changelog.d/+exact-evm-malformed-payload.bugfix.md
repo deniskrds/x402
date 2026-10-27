@@ -1,0 +1,1 @@
+The exact EVM facilitator now returns `invalid_payload` from `verify` and `settle` for malformed EIP-3009 payloads (missing or wrongly typed `authorization` fields, non-numeric amounts or timestamps) instead of raising. `invalid_message` / `error_message` names the malformed field.

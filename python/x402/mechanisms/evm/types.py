@@ -281,6 +281,34 @@ def is_eip3009_payload(payload: dict[str, Any]) -> bool:
     return "authorization" in payload
 
 
+def validate_eip3009_payload(payload: dict[str, Any]) -> str | None:
+    """Check that a raw EIP-3009 payload has the field types verify and settle parse.
+
+    The payload is client-supplied, so malformed input must be rejected as invalid
+    instead of raising.
+
+    Args:
+        payload: Raw payload dictionary.
+
+    Returns:
+        None if well-formed, otherwise a message naming the first malformed field.
+    """
+    authorization = payload.get("authorization")
+    if not isinstance(authorization, dict):
+        return "authorization must be an object"
+    for key in ("from", "to", "nonce"):
+        if not isinstance(authorization.get(key), str):
+            return f"authorization.{key} must be a string"
+    for key in ("value", "validAfter", "validBefore"):
+        number = authorization.get(key)
+        if not (isinstance(number, str) and number.isascii() and number.isdigit()):
+            return f"authorization.{key} must be an unsigned decimal string"
+    signature = payload.get("signature")
+    if signature is not None and not isinstance(signature, str):
+        return "signature must be a string"
+    return None
+
+
 @dataclass
 class TypedDataDomain:
     """EIP-712 domain separator."""
