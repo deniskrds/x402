@@ -281,11 +281,58 @@ def is_eip3009_payload(payload: dict[str, Any]) -> bool:
     return "authorization" in payload
 
 
-def validate_eip3009_payload(payload: dict[str, Any]) -> str | None:
-    """Check that a raw EIP-3009 payload has the field types verify and settle parse.
+def _is_uint_string(value: Any) -> bool:
+    return isinstance(value, str) and value.isascii() and value.isdigit()
+
+
+def _validate_eip3009_authorization(authorization: Any) -> str | None:
+    if not isinstance(authorization, dict):
+        return "authorization must be an object"
+    for key in ("from", "to", "nonce"):
+        if not isinstance(authorization.get(key), str):
+            return f"authorization.{key} must be a string"
+    for key in ("value", "validAfter", "validBefore"):
+        if not _is_uint_string(authorization.get(key)):
+            return f"authorization.{key} must be an unsigned decimal string"
+    return None
+
+
+def _validate_permit2_authorization(authorization: Any) -> str | None:
+    if not isinstance(authorization, dict):
+        return "permit2Authorization must be an object"
+    permitted = authorization.get("permitted")
+    if not isinstance(permitted, dict):
+        return "permit2Authorization.permitted must be an object"
+    witness = authorization.get("witness")
+    if not isinstance(witness, dict):
+        return "permit2Authorization.witness must be an object"
+    strings = {
+        "from": authorization.get("from"),
+        "spender": authorization.get("spender"),
+        "permitted.token": permitted.get("token"),
+        "witness.to": witness.get("to"),
+    }
+    for name, value in strings.items():
+        if not isinstance(value, str):
+            return f"permit2Authorization.{name} must be a string"
+    numbers = {
+        "nonce": authorization.get("nonce"),
+        "deadline": authorization.get("deadline"),
+        "permitted.amount": permitted.get("amount"),
+        "witness.validAfter": witness.get("validAfter"),
+    }
+    for name, value in numbers.items():
+        if not _is_uint_string(value):
+            return f"permit2Authorization.{name} must be an unsigned decimal string"
+    return None
+
+
+def validate_exact_evm_payload(payload: dict[str, Any]) -> str | None:
+    """Check that a raw exact EVM payload has the field types verify and settle parse.
 
     The payload is client-supplied, so malformed input must be rejected as invalid
-    instead of raising.
+    instead of raising. Permit2 and EIP-3009 payloads are told apart the same way
+    verify and settle route them.
 
     Args:
         payload: Raw payload dictionary.
@@ -293,20 +340,12 @@ def validate_eip3009_payload(payload: dict[str, Any]) -> str | None:
     Returns:
         None if well-formed, otherwise a message naming the first malformed field.
     """
-    authorization = payload.get("authorization")
-    if not isinstance(authorization, dict):
-        return "authorization must be an object"
-    for key in ("from", "to", "nonce"):
-        if not isinstance(authorization.get(key), str):
-            return f"authorization.{key} must be a string"
-    for key in ("value", "validAfter", "validBefore"):
-        number = authorization.get(key)
-        if not (isinstance(number, str) and number.isascii() and number.isdigit()):
-            return f"authorization.{key} must be an unsigned decimal string"
     signature = payload.get("signature")
     if signature is not None and not isinstance(signature, str):
         return "signature must be a string"
-    return None
+    if is_permit2_payload(payload):
+        return _validate_permit2_authorization(payload["permit2Authorization"])
+    return _validate_eip3009_authorization(payload.get("authorization"))
 
 
 @dataclass

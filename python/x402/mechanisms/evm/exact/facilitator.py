@@ -58,7 +58,7 @@ from ..types import (
     ExactEIP3009Payload,
     TransactionReceipt,
     is_permit2_payload,
-    validate_eip3009_payload,
+    validate_exact_evm_payload,
 )
 from ..utils import (
     bytes_to_hex,
@@ -152,13 +152,13 @@ class ExactEvmScheme:
         requirements: PaymentRequirements,
         context=None,
     ) -> VerifyResponse:
-        if is_permit2_payload(payload.payload):
-            return verify_permit2(self._signer, payload, requirements, context)
-        payload_error = validate_eip3009_payload(payload.payload)
+        payload_error = validate_exact_evm_payload(payload.payload)
         if payload_error:
             return VerifyResponse(
                 is_valid=False, invalid_reason=ERR_INVALID_PAYLOAD, invalid_message=payload_error
             )
+        if is_permit2_payload(payload.payload):
+            return verify_permit2(self._signer, payload, requirements, context)
         verify_result, _ = self._verify(payload, requirements, simulate=True)
         return verify_result
 
@@ -438,14 +438,9 @@ class ExactEvmScheme:
         Returns:
             SettleResponse with success, transaction, and payer.
         """
-        if is_permit2_payload(payload.payload):
-            return settle_permit2(
-                self._signer, payload, requirements, context, pending_store=self._pending_store
-            )
-
         network = str(requirements.network)
 
-        payload_error = validate_eip3009_payload(payload.payload)
+        payload_error = validate_exact_evm_payload(payload.payload)
         if payload_error:
             return SettleResponse(
                 success=False,
@@ -453,6 +448,11 @@ class ExactEvmScheme:
                 error_message=payload_error,
                 network=network,
                 transaction="",
+            )
+
+        if is_permit2_payload(payload.payload):
+            return settle_permit2(
+                self._signer, payload, requirements, context, pending_store=self._pending_store
             )
 
         # Fast path: a prior settle attempt for this exact payload already broadcast a
