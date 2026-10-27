@@ -127,6 +127,14 @@ class ExactEvmSchemeV1:
         requirements: PaymentRequirementsV1,
         context=None,
     ) -> VerifyResponse:
+        payload_error = validate_eip3009_payload(payload.payload)
+        if payload_error:
+            return VerifyResponse(
+                is_valid=False,
+                invalid_reason=ERR_INVALID_PAYLOAD,
+                invalid_message=payload_error,
+                payer=get_payload_payer(payload.payload),
+            )
         return self._verify(payload, requirements, simulate=True)
 
     def _verify(
@@ -149,15 +157,6 @@ class ExactEvmSchemeV1:
         Returns:
             VerifyResponse with is_valid and payer.
         """
-        payload_error = validate_eip3009_payload(payload.payload)
-        if payload_error:
-            return VerifyResponse(
-                is_valid=False,
-                invalid_reason=ERR_INVALID_PAYLOAD,
-                invalid_message=payload_error,
-                payer=get_payload_payer(payload.payload),
-            )
-
         evm_payload = ExactEIP3009Payload.from_dict(payload.payload)
         payer = evm_payload.authorization.from_address
         network = requirements.network
@@ -331,6 +330,17 @@ class ExactEvmSchemeV1:
         Returns:
             SettleResponse with success, transaction, and payer.
         """
+        payload_error = validate_eip3009_payload(payload.payload)
+        if payload_error:
+            return SettleResponse(
+                success=False,
+                error_reason=ERR_INVALID_PAYLOAD,
+                error_message=payload_error,
+                network=requirements.network,
+                payer=get_payload_payer(payload.payload),
+                transaction="",
+            )
+
         # First verify
         verify_result = self._verify(
             payload,
@@ -341,7 +351,6 @@ class ExactEvmSchemeV1:
             return SettleResponse(
                 success=False,
                 error_reason=verify_result.invalid_reason,
-                error_message=verify_result.invalid_message,
                 network=payload.network,
                 payer=verify_result.payer,
                 transaction="",
