@@ -476,6 +476,13 @@ class TestMalformedPayloads:
         assert validate_batch_settlement_settle_payload(body) is None
         assert EnrichedRefundPayload.from_dict(body).claims == []
 
+    def test_erc3009_salt_accepts_short_hex(self):
+        body = _deposit_body()
+        body["deposit"]["authorization"]["erc3009Authorization"]["salt"] = "0x1"
+
+        assert validate_batch_settlement_payload(body) is None
+        assert validate_batch_settlement_settle_payload(body) is None
+
 
 class _FakeReceipt:
     status = TX_STATUS_SUCCESS

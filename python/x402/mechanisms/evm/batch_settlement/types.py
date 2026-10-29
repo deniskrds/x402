@@ -491,6 +491,7 @@ def is_enriched_refund_payload(payload: dict[str, Any]) -> bool:
 
 _HEX_BYTES_RE = re.compile(r"(0x)?(?:[0-9a-fA-F]{2})*")
 _ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+_UINT256_HEX_RE = re.compile(r"0x[0-9a-fA-F]{1,64}")
 # Canonical bytes32 channel id: 0x followed by exactly 64 hex digits.
 _CHANNEL_ID_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _UINT40_MAX = 2**40 - 1
@@ -549,10 +550,10 @@ def _validate_deposit_erc3009_authorization(authorization: Any) -> str | None:
     path = "deposit.authorization.erc3009Authorization"
     if not isinstance(authorization, dict):
         return f"{path} must be an object"
-    # The deposit nonce encoder reads the salt as hex only when it is 0x-prefixed.
+    # The salt is a uint256; the deposit encoders read it as hex only when it is 0x-prefixed.
     salt = authorization.get("salt")
-    if not (is_bytes32_hex(salt) and salt.startswith("0x")):
-        return f"{path}.salt must be 0x followed by 64 hex digits"
+    if not (isinstance(salt, str) and _UINT256_HEX_RE.fullmatch(salt)):
+        return f"{path}.salt must be 0x followed by 1 to 64 hex digits"
     if not isinstance(authorization.get("signature"), str):
         return f"{path}.signature must be a string"
     for key in ("validAfter", "validBefore"):
