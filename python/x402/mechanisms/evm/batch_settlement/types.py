@@ -706,12 +706,11 @@ def validate_batch_settlement_payload(payload: dict[str, Any]) -> tuple[str, str
         None if well-formed or not a client payload type, otherwise the payload type's
         error reason and a message naming the first malformed field.
     """
-    payload_type = payload.get("type")
-    if payload_type == PAYLOAD_TYPE_DEPOSIT:
+    if is_deposit_payload(payload):
         return _with_reason(ERR_DEPOSIT_PAYLOAD, _validate_deposit(payload))
-    if payload_type == PAYLOAD_TYPE_VOUCHER:
+    if is_voucher_payload(payload):
         return _with_reason(ERR_VOUCHER_PAYLOAD, _validate_voucher(payload))
-    if payload_type == PAYLOAD_TYPE_REFUND:
+    if is_refund_payload(payload):
         return _with_reason(ERR_REFUND_PAYLOAD, _validate_refund(payload))
     return None
 
@@ -726,14 +725,13 @@ def validate_batch_settlement_settle_payload(payload: dict[str, Any]) -> tuple[s
         None if well-formed or not a settle payload type, otherwise the payload type's
         error reason and a message naming the first malformed field.
     """
-    payload_type = payload.get("type")
-    if payload_type == PAYLOAD_TYPE_DEPOSIT:
+    if is_deposit_payload(payload):
         return _with_reason(ERR_DEPOSIT_PAYLOAD, _validate_deposit(payload))
-    if payload_type == PAYLOAD_TYPE_CLAIM:
+    if is_claim_payload(payload):
         return _with_reason(ERR_CLAIM_PAYLOAD, _validate_claim(payload))
-    if payload_type == PAYLOAD_TYPE_REFUND:
+    if is_enriched_refund_payload(payload):
         return _with_reason(ERR_REFUND_PAYLOAD, _validate_enriched_refund(payload))
-    if payload_type == PAYLOAD_TYPE_SETTLE:
+    if is_settle_payload(payload):
         return _with_reason(ERR_SETTLE_PAYLOAD, _validate_settle(payload))
     return None
 

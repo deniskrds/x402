@@ -409,7 +409,7 @@ _MALFORMED_SETTLE_PAYLOADS = [
         id="claim-authorizer-signature",
     ),
     pytest.param(_settle_body, ("receiver",), 123, ERR_SETTLE_PAYLOAD, id="settle-receiver"),
-    pytest.param(_settle_body, ("token",), _MISSING, ERR_SETTLE_PAYLOAD, id="settle-token"),
+    pytest.param(_settle_body, ("token",), None, ERR_SETTLE_PAYLOAD, id="settle-token"),
     pytest.param(
         _enriched_refund_body, ("refundNonce",), "abc", ERR_REFUND_PAYLOAD, id="refund-nonce"
     ),
@@ -454,6 +454,23 @@ class TestMalformedPayloads:
         assert out.error_reason == reason
         assert str(path[-1]) in out.error_message
         assert out.network == NETWORK
+
+    def test_verify_missing_key_is_unknown_payload_type(self):
+        # A missing key fails the payload type guard, so validation leaves it to the fallback.
+        payload = _malformed_payload(_voucher_body, ("channelConfig",), _MISSING)
+
+        out = self._fac().verify(payload, _requirements())
+
+        assert out.is_valid is False
+        assert out.invalid_reason == ERR_INVALID_PAYLOAD_TYPE
+
+    def test_settle_missing_key_is_unknown_payload_type(self):
+        payload = _malformed_payload(_settle_body, ("token",), _MISSING)
+
+        out = self._fac().settle(payload, _requirements())
+
+        assert out.success is False
+        assert out.error_reason == ERR_INVALID_PAYLOAD_TYPE
 
     @pytest.mark.parametrize(
         "build", [_deposit_body, _deposit_permit2_body, _voucher_body, _refund_body]
