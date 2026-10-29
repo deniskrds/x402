@@ -426,8 +426,7 @@ class EnrichedRefundPayload:
         p.voucher = VoucherFields.from_dict(data["voucher"])
         p.amount = str(data["amount"])
         p.refund_nonce = str(data["refundNonce"])
-        # Go sends `"claims": null` when there are no outstanding claims.
-        p.claims = [VoucherClaim.from_dict(c) for c in data.get("claims") or []]
+        p.claims = [VoucherClaim.from_dict(c) for c in data.get("claims", [])]
         p.refund_authorizer_signature = data.get("refundAuthorizerSignature")
         p.claim_authorizer_signature = data.get("claimAuthorizerSignature")
         return p
@@ -495,11 +494,16 @@ _UINT256_HEX_RE = re.compile(r"0x[0-9a-fA-F]{1,64}")
 # Canonical bytes32 channel id: 0x followed by exactly 64 hex digits.
 _CHANNEL_ID_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _UINT40_MAX = 2**40 - 1
+_UINT128_MAX = 2**128 - 1
 
 
 def is_canonical_channel_id(value: object) -> bool:
     """Return True when value is a canonical `0x` + 64-hex-digit channel id."""
     return isinstance(value, str) and _CHANNEL_ID_RE.fullmatch(value) is not None
+
+
+def _is_uint128_string(value: Any) -> bool:
+    return is_uint256_string(value) and int(value) <= _UINT128_MAX
 
 
 def _is_address(value: Any) -> bool:
@@ -610,13 +614,14 @@ def _validate_deposit(payload: dict[str, Any]) -> str | None:
     authorization = deposit.get("authorization")
     if not isinstance(authorization, dict):
         return "deposit.authorization must be an object"
+    # Same truthiness as DepositAuthorization.from_dict, which ignores an empty authorization.
     erc3009 = authorization.get("erc3009Authorization")
-    if erc3009 is not None:
+    if erc3009:
         error = _validate_deposit_erc3009_authorization(erc3009)
         if error:
             return error
     permit2 = authorization.get("permit2Authorization")
-    if permit2 is not None:
+    if permit2:
         return _validate_deposit_permit2_authorization(permit2)
     return None
 
@@ -640,13 +645,14 @@ def _validate_claims(claims: Any) -> str | None:
             return f"{path} must be an object"
         if not _is_hex(claim.get("signature")):
             return f"{path}.signature must be a hex string"
-        if not is_uint256_string(claim.get("totalClaimed")):
-            return f"{path}.totalClaimed must be a uint256 decimal string"
+        # The ClaimBatch authorization signs both amounts as uint128.
+        if not _is_uint128_string(claim.get("totalClaimed")):
+            return f"{path}.totalClaimed must be a uint128 decimal string"
         voucher = claim.get("voucher")
         if not isinstance(voucher, dict):
             return f"{path}.voucher must be an object"
-        if not is_uint256_string(voucher.get("maxClaimableAmount")):
-            return f"{path}.voucher.maxClaimableAmount must be a uint256 decimal string"
+        if not _is_uint128_string(voucher.get("maxClaimableAmount")):
+            return f"{path}.voucher.maxClaimableAmount must be a uint128 decimal string"
         error = _validate_channel_config(voucher.get("channel"), f"{path}.voucher.channel")
         if error:
             return error
@@ -668,19 +674,20 @@ def _validate_claim(payload: dict[str, Any]) -> str | None:
 
 
 def _validate_enriched_refund(payload: dict[str, Any]) -> str | None:
-    error = _validate_voucher(payload)
+    error = _validate_channel_config(payload.get("channelConfig"), "channelConfig")
     if error:
         return error
+    # The refund handler never reads the voucher; from_dict only needs its keys.
+    voucher = payload.get("voucher")
+    if not isinstance(voucher, dict):
+        return "voucher must be an object"
+    for key in ("channelId", "maxClaimableAmount", "signature"):
+        if key not in voucher:
+            return f"voucher.{key} is required"
     for key in ("amount", "refundNonce"):
         if not is_uint256_string(payload.get(key)):
             return f"{key} must be a uint256 decimal string"
-    # Go sends `"claims": null` when there are no outstanding claims.
-    claims = payload.get("claims")
-    if claims is not None:
-        error = _validate_claims(claims)
-        if error:
-            return error
-    return _validate_authorizer_signatures(
+    return _validate_claims(payload.get("claims")) or _validate_authorizer_signatures(
         payload, ("refundAuthorizerSignature", "claimAuthorizerSignature")
     )
 

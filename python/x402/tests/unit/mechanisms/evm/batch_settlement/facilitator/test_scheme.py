@@ -414,6 +414,20 @@ _MALFORMED_SETTLE_PAYLOADS = [
         _enriched_refund_body, ("refundNonce",), "abc", ERR_REFUND_PAYLOAD, id="refund-nonce"
     ),
     pytest.param(_enriched_refund_body, ("claims",), "x", ERR_REFUND_PAYLOAD, id="refund-claims"),
+    pytest.param(
+        _claim_body,
+        ("claims", 0, "totalClaimed"),
+        str(2**128),
+        ERR_CLAIM_PAYLOAD,
+        id="claim-total-claimed-over-uint128",
+    ),
+    pytest.param(
+        _claim_body,
+        ("claims", 0, "voucher", "maxClaimableAmount"),
+        str(2**128),
+        ERR_CLAIM_PAYLOAD,
+        id="claim-max-claimable-over-uint128",
+    ),
 ]
 
 
@@ -485,13 +499,18 @@ class TestMalformedPayloads:
     def test_well_formed_settle_payloads_pass(self, build):
         assert validate_batch_settlement_settle_payload(build()) is None
 
-    def test_enriched_refund_accepts_null_claims(self):
-        # The Go server sends `"claims": null` for a refund with no outstanding claims.
+    def test_enriched_refund_ignores_voucher_contents(self):
         body = _enriched_refund_body()
-        body["claims"] = None
+        body["voucher"]["maxClaimableAmount"] = ""
 
         assert validate_batch_settlement_settle_payload(body) is None
-        assert EnrichedRefundPayload.from_dict(body).claims == []
+
+    def test_deposit_ignores_empty_erc3009_authorization_next_to_permit2(self):
+        body = _deposit_permit2_body()
+        body["deposit"]["authorization"]["erc3009Authorization"] = {}
+
+        assert validate_batch_settlement_payload(body) is None
+        assert validate_batch_settlement_settle_payload(body) is None
 
     def test_erc3009_salt_accepts_short_hex(self):
         body = _deposit_body()
