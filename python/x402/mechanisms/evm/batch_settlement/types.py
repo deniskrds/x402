@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..types import is_bytes32_hex, is_uint256_string
-from ..utils import is_valid_address
 from .constants import (
     PAYLOAD_TYPE_CLAIM,
     PAYLOAD_TYPE_DEPOSIT,
@@ -427,7 +426,8 @@ class EnrichedRefundPayload:
         p.voucher = VoucherFields.from_dict(data["voucher"])
         p.amount = str(data["amount"])
         p.refund_nonce = str(data["refundNonce"])
-        p.claims = [VoucherClaim.from_dict(c) for c in data.get("claims", [])]
+        # Go sends `"claims": null` when there are no outstanding claims.
+        p.claims = [VoucherClaim.from_dict(c) for c in data.get("claims") or []]
         p.refund_authorizer_signature = data.get("refundAuthorizerSignature")
         p.claim_authorizer_signature = data.get("claimAuthorizerSignature")
         return p
@@ -490,10 +490,19 @@ def is_enriched_refund_payload(payload: dict[str, Any]) -> bool:
 # `from_dict` and the handlers parse; malformed input is rejected instead of raising.
 
 _HEX_BYTES_RE = re.compile(r"(0x)?(?:[0-9a-fA-F]{2})*")
+_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+# Canonical bytes32 channel id: 0x followed by exactly 64 hex digits.
+_CHANNEL_ID_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+_UINT40_MAX = 2**40 - 1
+
+
+def is_canonical_channel_id(value: object) -> bool:
+    """Return True when value is a canonical `0x` + 64-hex-digit channel id."""
+    return isinstance(value, str) and _CHANNEL_ID_RE.fullmatch(value) is not None
 
 
 def _is_address(value: Any) -> bool:
-    return isinstance(value, str) and is_valid_address(value)
+    return isinstance(value, str) and _ADDRESS_RE.fullmatch(value) is not None
 
 
 def _is_hex(value: Any) -> bool:
@@ -507,8 +516,12 @@ def _validate_channel_config(config: Any, path: str) -> str | None:
         if not _is_address(config.get(key)):
             return f"{path}.{key} must be a 20-byte hex address"
     withdraw_delay = config.get("withdrawDelay")
-    if not isinstance(withdraw_delay, int) or isinstance(withdraw_delay, bool):
-        return f"{path}.withdrawDelay must be an integer"
+    if (
+        not isinstance(withdraw_delay, int)
+        or isinstance(withdraw_delay, bool)
+        or not 0 <= withdraw_delay <= _UINT40_MAX
+    ):
+        return f"{path}.withdrawDelay must be a uint40 integer"
     if not is_bytes32_hex(config.get("salt")):
         return f"{path}.salt must be a 32-byte hex string"
     return None
@@ -517,9 +530,10 @@ def _validate_channel_config(config: Any, path: str) -> str | None:
 def _validate_voucher_fields(voucher: Any) -> str | None:
     if not isinstance(voucher, dict):
         return "voucher must be an object"
-    for key in ("channelId", "signature"):
-        if not isinstance(voucher.get(key), str):
-            return f"voucher.{key} must be a string"
+    if not is_canonical_channel_id(voucher.get("channelId")):
+        return "voucher.channelId must be 0x followed by 64 hex digits"
+    if not _is_hex(voucher.get("signature")):
+        return "voucher.signature must be a hex string"
     if not is_uint256_string(voucher.get("maxClaimableAmount")):
         return "voucher.maxClaimableAmount must be a uint256 decimal string"
     return None
@@ -535,9 +549,12 @@ def _validate_deposit_erc3009_authorization(authorization: Any) -> str | None:
     path = "deposit.authorization.erc3009Authorization"
     if not isinstance(authorization, dict):
         return f"{path} must be an object"
-    for key in ("salt", "signature"):
-        if not isinstance(authorization.get(key), str):
-            return f"{path}.{key} must be a string"
+    # The deposit nonce encoder reads the salt as hex only when it is 0x-prefixed.
+    salt = authorization.get("salt")
+    if not (is_bytes32_hex(salt) and salt.startswith("0x")):
+        return f"{path}.salt must be 0x followed by 64 hex digits"
+    if not isinstance(authorization.get("signature"), str):
+        return f"{path}.signature must be a string"
     for key in ("validAfter", "validBefore"):
         if not is_uint256_string(authorization.get(key)):
             return f"{path}.{key} must be a uint256 decimal string"
@@ -656,7 +673,13 @@ def _validate_enriched_refund(payload: dict[str, Any]) -> str | None:
     for key in ("amount", "refundNonce"):
         if not is_uint256_string(payload.get(key)):
             return f"{key} must be a uint256 decimal string"
-    return _validate_claims(payload.get("claims")) or _validate_authorizer_signatures(
+    # Go sends `"claims": null` when there are no outstanding claims.
+    claims = payload.get("claims")
+    if claims is not None:
+        error = _validate_claims(claims)
+        if error:
+            return error
+    return _validate_authorizer_signatures(
         payload, ("refundAuthorizerSignature", "claimAuthorizerSignature")
     )
 

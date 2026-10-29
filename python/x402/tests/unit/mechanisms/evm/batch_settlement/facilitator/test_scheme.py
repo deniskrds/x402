@@ -328,6 +328,63 @@ _MALFORMED_VERIFY_PAYLOADS = [
     ),
     pytest.param(_refund_body, ("channelConfig",), "x", ERR_REFUND_PAYLOAD, id="refund-config"),
     pytest.param(_refund_body, ("amount",), "-1", ERR_REFUND_PAYLOAD, id="refund-amount"),
+    # Right type, bad content: each of these passed a type-only check and raised later.
+    pytest.param(
+        _voucher_body,
+        ("voucher", "signature"),
+        "0xzz",
+        ERR_VOUCHER_PAYLOAD,
+        id="voucher-signature-not-hex",
+    ),
+    pytest.param(
+        _voucher_body,
+        ("voucher", "channelId"),
+        "0X" + "aa" * 32,
+        ERR_VOUCHER_PAYLOAD,
+        id="voucher-channel-id-uppercase-prefix",
+    ),
+    pytest.param(
+        _voucher_body,
+        ("channelConfig", "payer"),
+        "0x-" + "1" * 39,
+        ERR_VOUCHER_PAYLOAD,
+        id="payer-signed-hex",
+    ),
+    pytest.param(
+        _voucher_body,
+        ("channelConfig", "payer"),
+        "0x0x" + "1" * 38,
+        ERR_VOUCHER_PAYLOAD,
+        id="payer-double-prefix",
+    ),
+    pytest.param(
+        _voucher_body,
+        ("channelConfig", "withdrawDelay"),
+        -1,
+        ERR_VOUCHER_PAYLOAD,
+        id="withdraw-delay-negative",
+    ),
+    pytest.param(
+        _voucher_body,
+        ("channelConfig", "withdrawDelay"),
+        2**40,
+        ERR_VOUCHER_PAYLOAD,
+        id="withdraw-delay-over-uint40",
+    ),
+    pytest.param(
+        _deposit_body,
+        ("deposit", "authorization", "erc3009Authorization", "salt"),
+        "abc",
+        ERR_DEPOSIT_PAYLOAD,
+        id="erc3009-salt-not-hex",
+    ),
+    pytest.param(
+        _deposit_body,
+        ("deposit", "authorization", "erc3009Authorization", "salt"),
+        "0x" + "11" * 33,
+        ERR_DEPOSIT_PAYLOAD,
+        id="erc3009-salt-33-bytes",
+    ),
 ]
 
 _MALFORMED_SETTLE_PAYLOADS = [
@@ -410,6 +467,14 @@ class TestMalformedPayloads:
     )
     def test_well_formed_settle_payloads_pass(self, build):
         assert validate_batch_settlement_settle_payload(build()) is None
+
+    def test_enriched_refund_accepts_null_claims(self):
+        # The Go server sends `"claims": null` for a refund with no outstanding claims.
+        body = _enriched_refund_body()
+        body["claims"] = None
+
+        assert validate_batch_settlement_settle_payload(body) is None
+        assert EnrichedRefundPayload.from_dict(body).claims == []
 
 
 class _FakeReceipt:
